@@ -1,0 +1,357 @@
+//@version=5
+strategy(
+  title="HYPE/USDT Grid Engine v1.0",
+  shorttitle="HYPE Grid",
+  overlay=true,
+  initial_capital=10000,
+  default_qty_type=strategy.fixed,
+  default_qty_value=1,
+  commission_type=strategy.commission.percent,
+  commission_value=0.055,  // Bybit taker fee
+  pyramiding=30,           // Allow multiple grid positions
+  calc_on_every_tick=false
+)
+
+// ═══════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════
+
+grp_grid = "Grid Settings"
+i_capital       = input.float(4000,  "Grid Capital (USDT)",      group=grp_grid)
+i_gridLevels    = input.int(20,      "Grid Levels",  minval=5, maxval=50, group=grp_grid)
+i_gridRange     = input.float(30,    "Grid Range % (above+below price)", group=grp_grid)
+i_autoRange     = input.bool(true,   "Auto Grid Range (ATR based)",      group=grp_grid)
+i_atrMult       = input.float(3.0,   "ATR Multiplier for Range",         group=grp_grid)
+i_atrLen        = input.int(50,      "ATR Length",                       group=grp_grid)
+i_rebalance     = input.bool(true,   "Auto Rebalance When Price Exits",  group=grp_grid)
+i_rebalPct      = input.float(5.0,   "Rebalance Trigger %",              group=grp_grid)
+
+grp_trend = "Trend Detection"
+i_adxLen        = input.int(14,      "ADX Length",               group=grp_trend)
+i_adxThresh     = input.float(25,    "ADX Trend Threshold",      group=grp_trend)
+i_emaFast       = input.int(21,      "Fast EMA",                 group=grp_trend)
+i_emaSlow       = input.int(55,      "Slow EMA",                 group=grp_trend)
+i_trendFilter   = input.bool(true,   "Pause Grid During Trends", group=grp_trend)
+
+grp_risk = "Risk Management"
+i_stopLoss      = input.float(15,    "Grid Stop Loss % (whole grid)",    group=grp_risk)
+i_dailyTarget   = input.float(100,   "Daily Profit Target (USDT)",       group=grp_risk)
+i_maxLoss       = input.float(200,   "Max Daily Loss (USDT)",            group=grp_risk)
+i_leverage      = input.int(5,       "Leverage",  minval=1, maxval=20,   group=grp_risk)
+
+grp_display = "Display"
+i_showGrid      = input.bool(true,   "Show Grid Lines",          group=grp_display)
+i_showMode      = input.bool(true,   "Show Market Mode Label",   group=grp_display)
+i_showStats     = input.bool(true,   "Show Stats Table",         group=grp_display)
+
+// ═══════════════════════════════════════════════════════════════════
+// INDICATORS
+// ═══════════════════════════════════════════════════════════════════
+
+// ATR for dynamic range
+atr = ta.atr(i_atrLen)
+
+// EMA trend
+emaFast = ta.ema(close, i_emaFast)
+emaSlow = ta.ema(close, i_emaSlow)
+
+// ADX calculation
+[diPlus, diMinus, adx] = ta.dmi(i_adxLen, i_adxLen)
+
+// RSI
+rsi = ta.rsi(close, 14)
+
+// Volume spike
+volSma = ta.sma(volume, 20)
+volSpike = volume > volSma * 2.0
+
+// ═══════════════════════════════════════════════════════════════════
+// MARKET MODE DETECTION
+// ═══════════════════════════════════════════════════════════════════
+
+isTrending   = adx > i_adxThresh
+isUptrend    = isTrending and emaFast > emaSlow and close > emaFast
+isDowntrend  = isTrending and emaFast < emaSlow and close < emaFast
+isRanging    = not isTrending
+
+// Mode string
+marketMode = isUptrend ? "UPTREND" : isDowntrend ? "DOWNTREND" : "RANGING"
+
+// Grid should run only when ranging (or trend filter off)
+gridActive = i_trendFilter ? isRanging : true
+
+// Mode change detection
+modeChanged     = marketMode != marketMode[1]
+gridJustPaused  = gridActive[1] and not gridActive
+gridJustResumed = not gridActive[1] and gridActive
+
+// ═══════════════════════════════════════════════════════════════════
+// GRID CALCULATION
+// ═══════════════════════════════════════════════════════════════════
+
+// Dynamic range based on ATR
+gridRangePct = i_autoRange ? (atr / close * 100 * i_atrMult) : (i_gridRange / 2)
+
+// Grid boundaries
+var float gridUpper  = na
+var float gridLower  = na
+var float gridMid    = na
+var float gridSpacing = na
+
+// Initialize or rebalance grid
+needsInit     = na(gridUpper)
+priceAbove    = not na(gridUpper) and close > gridUpper * (1 + i_rebalPct / 100)
+priceBelow    = not na(gridLower) and close < gridLower * (1 - i_rebalPct / 100)
+needsRebal    = i_rebalance and (priceAbove or priceBelow)
+
+if needsInit or (needsRebal and gridActive) or gridJustResumed
+    gridMid     := close
+    gridUpper   := close * (1 + gridRangePct / 100)
+    gridLower   := close * (1 - gridRangePct / 100)
+    gridSpacing := (gridUpper - gridLower) / i_gridLevels
+
+// Capital per grid level
+capitalPerLevel = i_capital / i_gridLevels
+qtyPerLevel     = (capitalPerLevel * i_leverage) / close
+
+// ═══════════════════════════════════════════════════════════════════
+// GRID LEVEL ARRAYS
+// ═══════════════════════════════════════════════════════════════════
+
+// Calculate all grid levels
+getGridLevel(n) =>
+    not na(gridLower) ? gridLower + (gridSpacing * n) : na
+
+// ═══════════════════════════════════════════════════════════════════
+// GRID TRADING LOGIC
+// ═══════════════════════════════════════════════════════════════════
+
+var int   lastGridBuy  = -1
+var int   lastGridSell = -1
+var float totalGridPnl = 0.0
+var int   gridTrades   = 0
+var float dailyPnl     = 0.0
+var int   currentDay   = 0
+
+// Reset daily tracking
+today = dayofyear
+if today != currentDay
+    currentDay := today
+    dailyPnl   := 0.0
+
+// Grid buy signals: price touches a grid level from above (bounces)
+gridBuySignal  = false
+gridSellSignal = false
+
+if gridActive and not na(gridLower) and not na(gridUpper)
+    // Check each grid level
+    for i = 1 to i_gridLevels - 1
+        level = getGridLevel(i)
+        if not na(level)
+            // Price crosses DOWN through level → BUY (expecting bounce up)
+            if low <= level and low[1] > level and close > gridLower
+                gridBuySignal := true
+
+            // Price crosses UP through level → SELL (take profit)
+            if high >= level and high[1] < level and close < gridUpper
+                gridSellSignal := true
+
+// ═══════════════════════════════════════════════════════════════════
+// STOP LOSS & TAKE PROFIT FOR GRID
+// ═══════════════════════════════════════════════════════════════════
+
+// Grid stop loss: if price falls below lower bound significantly
+gridStopHit = close < gridLower * (1 - i_stopLoss / 100)
+
+// Close all if stop hit
+if gridStopHit and strategy.position_size != 0
+    strategy.close_all(comment="Grid Stop Loss")
+
+// ═══════════════════════════════════════════════════════════════════
+// EXECUTE GRID ORDERS
+// ═══════════════════════════════════════════════════════════════════
+
+if gridActive and not gridStopHit
+    // BUY order at grid level (Long)
+    if gridBuySignal and barstate.isconfirmed
+        tpPrice = close * (1 + (gridSpacing / close))
+        slPrice = gridLower * (1 - i_stopLoss / 100)
+        strategy.entry(
+          "Grid Buy",
+          strategy.long,
+          qty=qtyPerLevel,
+          comment="G-BUY"
+        )
+        strategy.exit(
+          "Grid Buy Exit",
+          "Grid Buy",
+          limit=tpPrice,
+          stop=slPrice
+        )
+        lastGridBuy := bar_index
+
+    // SELL/SHORT at grid level top
+    if gridSellSignal and barstate.isconfirmed
+        tpPrice = close * (1 - (gridSpacing / close))
+        slPrice = gridUpper * (1 + i_stopLoss / 100)
+        strategy.entry(
+          "Grid Sell",
+          strategy.short,
+          qty=qtyPerLevel,
+          comment="G-SELL"
+        )
+        strategy.exit(
+          "Grid Sell Exit",
+          "Grid Sell",
+          limit=tpPrice,
+          stop=slPrice
+        )
+        lastGridSell := bar_index
+
+// ═══════════════════════════════════════════════════════════════════
+// TREND MODE — PAUSE GRID, RIDE THE MOVE
+// ═══════════════════════════════════════════════════════════════════
+
+// When trend is detected, close grid and open trend position
+if gridJustPaused
+    strategy.close_all(comment="Trend Detected - Grid Paused")
+
+// Simple trend following when grid is off
+trendQty = (i_capital * 0.5 * i_leverage) / close
+
+if i_trendFilter
+    // Enter long on uptrend start
+    if isUptrend and not isUptrend[1] and barstate.isconfirmed
+        strategy.entry("Trend Long", strategy.long, qty=trendQty, comment="TREND-LONG")
+        strategy.exit("Trend Long Exit", "Trend Long",
+          trail_price=close,
+          trail_offset=close * 0.02 / syminfo.mintick,  // 2% trailing stop
+          stop=close * 0.95
+        )
+
+    // Enter short on downtrend start
+    if isDowntrend and not isDowntrend[1] and barstate.isconfirmed
+        strategy.entry("Trend Short", strategy.short, qty=trendQty, comment="TREND-SHORT")
+        strategy.exit("Trend Short Exit", "Trend Short",
+          trail_price=close,
+          trail_offset=close * 0.02 / syminfo.mintick,
+          stop=close * 1.05
+        )
+
+    // Close trend positions when ranging resumes
+    if gridJustResumed
+        strategy.close("Trend Long",  comment="Trend Over")
+        strategy.close("Trend Short", comment="Trend Over")
+
+// ═══════════════════════════════════════════════════════════════════
+// VISUAL — GRID LINES
+// ═══════════════════════════════════════════════════════════════════
+
+// Draw grid lines
+if i_showGrid and not na(gridLower) and not na(gridUpper)
+    // Upper bound
+    line.new(bar_index - 1, gridUpper, bar_index, gridUpper,
+      color=color.new(color.red, 30), width=2, extend=extend.right)
+    // Lower bound
+    line.new(bar_index - 1, gridLower, bar_index, gridLower,
+      color=color.new(color.green, 30), width=2, extend=extend.right)
+    // Mid line
+    line.new(bar_index - 1, gridMid, bar_index, gridMid,
+      color=color.new(color.yellow, 60), width=1, style=line.style_dashed, extend=extend.right)
+    // Grid levels (every level)
+    for i = 1 to i_gridLevels - 1
+        lvl = getGridLevel(i)
+        if not na(lvl)
+            line.new(bar_index - 1, lvl, bar_index, lvl,
+              color=color.new(color.blue, 75), width=1,
+              style=line.style_dotted, extend=extend.right)
+
+// EMA lines
+plot(emaFast, "EMA Fast", color=color.new(color.orange, 20), linewidth=1)
+plot(emaSlow, "EMA Slow", color=color.new(color.purple, 20), linewidth=1)
+
+// ═══════════════════════════════════════════════════════════════════
+// VISUAL — BACKGROUND MODE COLOR
+// ═══════════════════════════════════════════════════════════════════
+
+bgColor = isUptrend   ? color.new(color.green, 93) :
+          isDowntrend ? color.new(color.red,   93) :
+          color.new(color.blue, 96)
+bgcolor(bgColor, title="Market Mode Background")
+
+// ═══════════════════════════════════════════════════════════════════
+// VISUAL — SIGNALS
+// ═══════════════════════════════════════════════════════════════════
+
+plotshape(gridBuySignal  and gridActive, "Grid Buy",  shape.triangleup,   location.belowbar, color.lime,  size=size.tiny)
+plotshape(gridSellSignal and gridActive, "Grid Sell", shape.triangledown, location.abovebar, color.red,   size=size.tiny)
+plotshape(gridJustPaused,  "Grid Pause",  shape.xcross, location.abovebar, color.orange, size=size.small)
+plotshape(gridJustResumed, "Grid Resume", shape.circle, location.belowbar, color.aqua,   size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════
+// VISUAL — MODE LABEL
+// ═══════════════════════════════════════════════════════════════════
+
+if i_showMode and barstate.islast
+    modeColor = isUptrend ? color.green : isDowntrend ? color.red : color.aqua
+    modeText  = isUptrend ? "▲ UPTREND\nGrid PAUSED\nRiding Long" :
+                isDowntrend ? "▼ DOWNTREND\nGrid PAUSED\nRiding Short" :
+                "◆ RANGING\nGrid ACTIVE\n" + str.tostring(i_gridLevels) + " levels"
+    label.new(bar_index + 3, high * 1.01,
+      text=modeText,
+      color=color.new(modeColor, 80),
+      textcolor=modeColor,
+      style=label.style_label_left,
+      size=size.normal
+    )
+
+// ═══════════════════════════════════════════════════════════════════
+// STATS TABLE
+// ═══════════════════════════════════════════════════════════════════
+
+if i_showStats and barstate.islast
+    var table statsTable = table.new(
+      position.bottom_right, 2, 10,
+      bgcolor=color.new(color.black, 70),
+      border_color=color.new(color.gray, 50),
+      border_width=1, frame_color=color.new(color.gray, 50), frame_width=1
+    )
+
+    netPnl     = strategy.netprofit
+    winRate    = strategy.wintrades / math.max(strategy.closedtrades, 1) * 100
+    avgWin     = strategy.grossprofit / math.max(strategy.wintrades, 1)
+    avgLoss    = strategy.grossloss   / math.max(strategy.losstrades, 1)
+    profFactor = math.abs(strategy.grossprofit / math.max(math.abs(strategy.grossloss), 1))
+    maxDD      = strategy.max_drawdown
+
+    header(txt) =>
+        table.cell(statsTable, 0, 0, "  GRID ENGINE STATS  ", text_color=color.white,
+          bgcolor=color.new(color.blue, 40), text_size=size.small)
+        table.merge_cells(statsTable, 0, 0, 1, 0)
+
+    row(r, label, value, valColor) =>
+        table.cell(statsTable, 0, r, label,       text_color=color.new(color.gray, 10), text_size=size.small)
+        table.cell(statsTable, 1, r, value,        text_color=valColor, text_size=size.small)
+
+    header("")
+    row(1, "Net PnL",      "$" + str.tostring(math.round(netPnl, 2)),        netPnl > 0 ? color.lime : color.red)
+    row(2, "Win Rate",     str.tostring(math.round(winRate, 1)) + "%",        winRate > 50 ? color.lime : color.orange)
+    row(3, "Total Trades", str.tostring(strategy.closedtrades),               color.white)
+    row(4, "Avg Win",      "$" + str.tostring(math.round(avgWin, 2)),         color.lime)
+    row(5, "Avg Loss",     "$" + str.tostring(math.round(math.abs(avgLoss), 2)), color.red)
+    row(6, "Profit Factor",str.tostring(math.round(profFactor, 2)),           profFactor > 1.5 ? color.lime : color.orange)
+    row(7, "Max Drawdown", "$" + str.tostring(math.round(maxDD, 2)),          color.red)
+    row(8, "Market Mode",  marketMode,                                         isUptrend ? color.lime : isDowntrend ? color.red : color.aqua)
+    row(9, "Grid Status",  gridActive ? "ACTIVE" : "PAUSED",                  gridActive ? color.lime : color.orange)
+
+// ═══════════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════════
+
+alertcondition(gridBuySignal  and gridActive, "Grid Buy Signal",  "HYPE Grid: BUY at {{close}}")
+alertcondition(gridSellSignal and gridActive, "Grid Sell Signal", "HYPE Grid: SELL at {{close}}")
+alertcondition(gridJustPaused,               "Grid Paused",      "HYPE Grid: PAUSED - Trend detected {{close}}")
+alertcondition(gridJustResumed,              "Grid Resumed",      "HYPE Grid: RESUMED - Range market {{close}}")
+alertcondition(gridStopHit,                  "Grid Stop Loss",    "HYPE Grid: STOP LOSS HIT at {{close}}")
+alertcondition(isUptrend   and not isUptrend[1],   "Uptrend Start",   "HYPE: UPTREND started - riding long")
+alertcondition(isDowntrend and not isDowntrend[1], "Downtrend Start", "HYPE: DOWNTREND started - riding short")

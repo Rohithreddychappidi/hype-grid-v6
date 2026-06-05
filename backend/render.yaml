@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: hype-grid-backend
+    env: node
+    region: singapore
+    plan: starter
+    buildCommand: npm install
+    startCommand: node src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PAPER_TRADING
+        value: true
+      - key: PORT
+        value: 3001
+      - key: SYMBOL
+        value: HYPEUSDT
+      - key: GRID_CAPITAL
+        value: 250
+      - key: GRID_LEVELS
+        value: 25
+      - key: LEVERAGE
+        value: 10
+      - key: PAPER_BALANCE
+        value: 250
+      # Set these in Render dashboard (secret):
+      # DATABASE_URL
+      # API_SECRET
+      # BYBIT_API_KEY
+      # BYBIT_SECRET
+      # TELEGRAM_BOT_TOKEN
+      # TELEGRAM_CHAT_ID

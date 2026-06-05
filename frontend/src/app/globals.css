@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #080a0e;
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #1c2230; border-radius: 2px; }
+
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+.pos { color: #00d4aa; }
+.neg { color: #ff4757; }
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.2; }
+}
+.blink { animation: blink 1.4s infinite; }
+
+@keyframes fadein {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fadein { animation: fadein 0.25s ease-out; }
+
+/* Grid level bar */
+.grid-level-buy  { background: linear-gradient(90deg, #00d4aa15, transparent); border-left: 2px solid #00d4aa; }
+.grid-level-sell { background: linear-gradient(90deg, #ff475715, transparent); border-left: 2px solid #ff4757; }
+.grid-level-fill { background: linear-gradient(90deg, #ffa50220, transparent); border-left: 2px solid #ffa502; }
