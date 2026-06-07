@@ -50,13 +50,20 @@ class GridEngine extends EventEmitter {
     if (!res.rows[0]) throw new Error('No grid config found. Run migrate first.');
     this.config = res.rows[0];
 
-    // Instrument info
-    this.instrInfo = await bybitClient.getInstrumentInfo(this.symbol);
-    console.log(`[Grid] Instrument: minQty=${this.instrInfo.minQty} step=${this.instrInfo.qtyStep} tick=${this.instrInfo.tickSize}`);
+    // Instrument info — use defaults if Bybit blocks the request
+    try {
+      this.instrInfo = await bybitClient.getInstrumentInfo(this.symbol);
+      console.log(`[Grid] Instrument: minQty=${this.instrInfo.minQty} step=${this.instrInfo.qtyStep} tick=${this.instrInfo.tickSize}`);
+    } catch(e) {
+      console.warn(`[Grid] Could not fetch instrument info (${e.message}) — using defaults`);
+      this.instrInfo = { minQty: 0.1, qtyStep: 0.1, tickSize: 0.001 };
+    }
 
     // Set leverage (live only)
     if (!isPaper()) {
-      await bybitClient.setLeverage(this.symbol, this.config.leverage).catch(() => {});
+      await bybitClient.setLeverage(this.symbol, this.config.leverage).catch(e =>
+        console.warn('[Grid] Could not set leverage:', e.message)
+      );
     }
 
     // Subscribe price feed

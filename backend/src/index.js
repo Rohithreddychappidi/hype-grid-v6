@@ -111,11 +111,16 @@ async function start() {
   await new Promise((resolve) => {
     if (wsManager.isPubConn) return resolve();
     wsManager.once('pub:connected', resolve);
-    setTimeout(resolve, 5000); // fallback
+    setTimeout(resolve, 8000); // fallback
   });
 
-  // Init grid engine
-  await gridEngine.init();
+  // Init grid engine — non-fatal
+  try {
+    await gridEngine.init();
+  } catch(e) {
+    console.error('[Startup] Grid init error:', e.message);
+    console.log('[Startup] Continuing anyway — grid can be started from dashboard');
+  }
 
   // Start HTTP server
   app.listen(PORT, () => {
