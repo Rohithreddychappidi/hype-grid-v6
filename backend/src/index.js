@@ -84,6 +84,19 @@ cron.schedule('*/3 * * * *', async () => {
   }
 });
 
+// Keep Render free tier awake — ping self every 10 minutes
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+if (RENDER_URL && process.env.NODE_ENV === 'production') {
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      const axios = require('axios');
+      await axios.get(`${RENDER_URL}/health`, { timeout: 5000 });
+      console.log('[KeepAlive] Pinged self — staying awake');
+    } catch(e) { /* silent */ }
+  });
+  console.log('[KeepAlive] Self-ping enabled');
+}
+
 // Daily report at midnight UTC
 cron.schedule('0 0 * * *', () => {
   const state = gridEngine.getState();

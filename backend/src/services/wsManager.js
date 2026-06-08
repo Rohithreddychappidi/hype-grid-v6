@@ -31,6 +31,7 @@ class WSManager extends EventEmitter {
   connectPublic() {
     if (this.pubWs?.readyState === WebSocket.OPEN) return;
     this.pubWs = new WebSocket(this.pubUrl);
+    this._lastPubMsg = Date.now();
 
     this.pubWs.on('open', () => {
       console.log('[WS:Pub] Connected');
@@ -38,10 +39,12 @@ class WSManager extends EventEmitter {
       this.pubAttempts = 0;
       this._ping(this.pubWs, 'pub');
       this._resubscribe();
+      this._startWatchdog();
       this.emit('pub:connected');
     });
 
     this.pubWs.on('message', raw => {
+      this._lastPubMsg = Date.now();
       try {
         const msg = JSON.parse(raw);
         if (!msg.topic) return;
@@ -70,12 +73,37 @@ class WSManager extends EventEmitter {
     this.pubWs.on('close', () => {
       this.isPubConn = false;
       this._stopPing('pub');
+      this._stopWatchdog();
       const delay = Math.min(2000 * ++this.pubAttempts, 30000);
       console.log(`[WS:Pub] Reconnecting in ${delay}ms`);
       setTimeout(() => this.connectPublic(), delay);
     });
 
-    this.pubWs.on('error', e => console.error('[WS:Pub]', e.message));
+    this.pubWs.on('error', e => {
+      console.error('[WS:Pub]', e.message);
+      // Force close so reconnect triggers
+      this.pubWs.terminate();
+    });
+  }
+
+  // Watchdog: if no message for 60 seconds, force reconnect
+  _startWatchdog() {
+    this._stopWatchdog();
+    this._watchdog = setInterval(() => {
+      const silent = Date.now() - (this._lastPubMsg || 0);
+      if (silent > 60000) {
+        console.log(`[WS:Pub] Watchdog: no message for ${Math.round(silent/1000)}s — force reconnecting`);
+        this.isPubConn = false;
+        this._stopPing('pub');
+        this._stopWatchdog();
+        try { this.pubWs.terminate(); } catch(e) {}
+        setTimeout(() => this.connectPublic(), 1000);
+      }
+    }, 30000); // check every 30 seconds
+  }
+
+  _stopWatchdog() {
+    if (this._watchdog) { clearInterval(this._watchdog); this._watchdog = null; }
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────

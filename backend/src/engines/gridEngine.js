@@ -30,6 +30,23 @@ class GridEngine extends EventEmitter {
       }
     });
 
+    // Auto rebuild grid after WS reconnects
+    wsManager.on('pub:connected', async () => {
+      if (this.running && !this.paused) {
+        console.log('[Grid] WS reconnected — resubscribing and checking grid');
+        wsManager.subscribeTicker(this.symbol);
+        wsManager.subscribeKline(this.symbol, '5');
+        // Small delay then verify grid still has orders
+        setTimeout(async () => {
+          const openOrders = this.gridLevels.filter(l => l.status === 'OPEN');
+          if (openOrders.length < this.config?.levels * 0.5) {
+            console.log('[Grid] Less than 50% orders active after reconnect — rebuilding');
+            await this.buildGrid().catch(e => console.error('[Grid] Rebuild error:', e.message));
+          }
+        }, 5000);
+      }
+    });
+
     // Listen for paper fills
     if (isPaper()) {
       paperTrading.on('fill', (trade) => {

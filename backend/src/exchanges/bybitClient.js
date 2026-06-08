@@ -53,11 +53,21 @@ class BybitClient {
   }
 
   async getKlines(symbol, interval = '1', limit = 200) {
-    const res = await this.http.get(
-      `/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`
-    );
-    // Returns [time, open, high, low, close, volume] newest first — reverse for chronological
-    return (res.data.result.list || []).reverse();
+    const url = `${this.baseUrl}/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`;
+    // Use plain axios without auth headers — public endpoint, avoids 403 on cloud IPs
+    try {
+      const res = await axios.get(url, {
+        timeout: 8000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TradingBot/1.0)' }
+      });
+      return (res.data.result?.list || []).reverse();
+    } catch(e) {
+      // Fallback: try with default http client
+      const res = await this.http.get(
+        `/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`
+      );
+      return (res.data.result?.list || []).reverse();
+    }
   }
 
   async getInstrumentInfo(symbol) {

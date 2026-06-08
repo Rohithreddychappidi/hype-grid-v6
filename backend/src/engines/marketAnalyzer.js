@@ -16,7 +16,6 @@ class MarketAnalyzer {
   async fetchKlines(interval = '5', limit = 100) {
     try {
       const raw = await bybitClient.getKlines(this.symbol, interval, limit);
-      // raw: [time, open, high, low, close, volume]
       this.klines = raw.map(k => ({
         time:   parseInt(k[0]),
         open:   parseFloat(k[1]),
@@ -27,7 +26,17 @@ class MarketAnalyzer {
       }));
       return this.klines;
     } catch(e) {
-      console.error('[Analyzer] Kline fetch error:', e.message);
+      // Bybit REST blocked on this server — use cached klines or WS price
+      const wsPrice = wsManager.getPrice(this.symbol);
+      if (wsPrice && this.klines.length > 0) {
+        // Update last candle with current WS price
+        this.klines[this.klines.length - 1].close = wsPrice;
+      }
+      // Don't log every time — only first occurrence
+      if (!this._klineErrorLogged) {
+        console.warn(`[Analyzer] Kline REST blocked (403) — using cached data + WS price`);
+        this._klineErrorLogged = true;
+      }
       return this.klines;
     }
   }
