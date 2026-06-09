@@ -105,7 +105,7 @@ export default function Dashboard() {
                 <TradeFills trades={trades.slice(0, 10)} />
               </div>
               <div className="space-y-4">
-                <MarketMode market={state?.market} />
+                <MarketMode market={state?.market} currentPrice={state?.currentPrice} />
                 <PaperPanel paper={paper} onRefresh={refresh} />
                 <EventLog events={events.slice(0, 10)} />
               </div>
@@ -118,7 +118,7 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="space-y-4">
               <GridControl state={state} config={config} onRefresh={refresh} />
-              <MarketMode market={state?.market} />
+              <MarketMode market={state?.market} currentPrice={state?.currentPrice} />
             </div>
             <GridLevels state={state} />
           </div>

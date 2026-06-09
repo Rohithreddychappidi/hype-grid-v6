@@ -4,7 +4,7 @@ import { Card, SectionTitle, Badge, Empty } from '../ui';
 
 export default function GridLevels({ state }: { state: any }) {
   const levels  = state?.gridLevels || [];
-  const price   = parseFloat(state?.market?.indicators?.price  || 0);
+  const price   = parseFloat(state?.currentPrice || state?.market?.indicators?.price || 0);
   const upper   = parseFloat(state?.config?.upper_bound || 0);
   const lower   = parseFloat(state?.config?.lower_bound || 0);
   const spacing = parseFloat(state?.config?.spacing     || 0);

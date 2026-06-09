@@ -136,13 +136,24 @@ async function start() {
   }
 
   // Start HTTP server
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log(`✅ API running on http://localhost:${PORT}`);
     console.log(`📊 Symbol: ${SYMBOL}`);
     console.log(`💰 Mode: ${isPaper ? 'PAPER (no real money)' : '⚠️  LIVE TRADING'}`);
     console.log('');
-    console.log('Grid is initialized. Use the dashboard or API to start.');
-    console.log(`POST http://localhost:${PORT}/api/grid/start  → to start grid`);
+
+    if (process.env.AUTO_START === 'true') {
+      console.log('[AutoStart] Starting grid automatically...');
+      try {
+        await gridEngine.start();
+        console.log('[AutoStart] Grid started ✅');
+      } catch(e) {
+        console.error('[AutoStart] Failed:', e.message);
+      }
+    } else {
+      console.log('Grid is initialized. Use the dashboard or API to start.');
+      console.log(`POST http://localhost:${PORT}/api/grid/start  → to start grid`);
+    }
     console.log('');
   });
 }

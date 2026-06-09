@@ -434,6 +434,12 @@ class GridEngine extends EventEmitter {
     const pos  = isPaper() ? paperTrading.getPositions() : [];
     const open = this.gridLevels.filter(l => l.status === 'OPEN');
     const filled = this.gridLevels.filter(l => l.status === 'FILLED');
+    const currentPrice = wsManager.getPrice(this.symbol) || 0;
+
+    const marketState = marketAnalyzer.getState();
+    if (currentPrice && !marketState.indicators?.price) {
+      marketState.indicators = { ...marketState.indicators, price: currentPrice };
+    }
 
     return {
       running:      this.running,
@@ -446,11 +452,12 @@ class GridEngine extends EventEmitter {
       dailyPnl:     this.dailyPnl,
       totalPnl:     this.totalPnl,
       totalTrades:  this.gridTrades,
+      currentPrice,
       gridLevels:   this.gridLevels,
       config:       this.config,
       balance:      bal,
       positions:    pos,
-      market:       marketAnalyzer.getState(),
+      market:       marketState,
     };
   }
 }

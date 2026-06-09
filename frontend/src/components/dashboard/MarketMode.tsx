@@ -2,10 +2,10 @@
 'use client';
 import { Card, SectionTitle } from '../ui';
 
-export default function MarketMode({ market }: { market: any }) {
+export default function MarketMode({ market, currentPrice }: { market: any; currentPrice?: number }) {
   const mode = market?.mode || 'UNKNOWN';
   const ind  = {
-    price:      parseFloat(market?.indicators?.price      || 0),
+    price:      parseFloat(String(currentPrice || market?.indicators?.price || 0)),
     adx:        parseFloat(market?.indicators?.adx        || 0),
     rsi:        parseFloat(market?.indicators?.rsi        || 0),
     atrPercent: parseFloat(market?.indicators?.atrPercent || 0),
